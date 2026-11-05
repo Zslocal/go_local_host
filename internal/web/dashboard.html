@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>hostmon · 服务器监控</title>
+<style>
+:root{
+  --bg:#f4f6fa; --panel:#fff; --line:#e6eaf1; --line-soft:#f0f3f8;
+  --text:#16202f; --muted:#6b7891; --faint:#98a4b8;
+  --accent:#3b65f6; --accent-soft:#eaf0ff;
+  --ok:#12a26b; --warn:#e78a13; --danger:#e0483d;
+  --track:#e9edf4; --hover:#f7f9fd;
+  --shadow:0 1px 2px rgba(20,32,55,.04), 0 6px 20px rgba(20,32,55,.05);
+  --radius:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0d121b; --panel:#151d29; --line:#263244; --line-soft:#1e293a;
+    --text:#e8edf6; --muted:#93a1b8; --faint:#6b7a92;
+    --accent:#7ba0ff; --accent-soft:#1d2b49;
+    --ok:#3ddc9a; --warn:#ffb454; --danger:#ff7b70;
+    --track:#243044; --hover:#1b2534;
+    --shadow:0 1px 2px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.22);
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text); overflow-x:hidden;
+  font:clamp(13px, .28vw + 12.2px, 15px)/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:min(1560px, 100% - 40px); margin:0 auto; padding:24px 0 42px}
+
+/* ---------- 顶栏 ---------- */
+.topbar{display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin-bottom:22px}
+.brand{display:flex; align-items:center; gap:12px; min-width:0}
+.brand-mark{
+  flex:none; width:38px; height:38px; border-radius:11px;
+  background:linear-gradient(140deg,var(--accent),#7d5cf0); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  font-size:19px; font-weight:700; letter-spacing:-1px;
+  box-shadow:0 4px 12px rgba(59,101,246,.28);
+}
+.brand-txt{min-width:0}
+.brand-title{font-size:clamp(16px,.6vw+14px,20px); font-weight:680; letter-spacing:.2px; line-height:1.25}
+.brand-title em{font-style:normal; color:var(--muted); font-weight:450; margin-left:7px}
+.brand-sub{
+  color:var(--muted); font-size:12px; margin-top:3px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:min(72vw,860px);
+}
+.tools{margin-left:auto; display:flex; flex-wrap:wrap; align-items:center; gap:8px}
+.badge{
+  display:inline-flex; align-items:center; gap:7px; padding:6px 12px;
+  border:1px solid var(--line); border-radius:9px; background:var(--panel);
+  font-size:12px; color:var(--muted); white-space:nowrap;
+}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 3px rgba(18,162,107,.13)}
+.dot.off{background:var(--danger); box-shadow:0 0 0 3px rgba(224,72,61,.13)}
+select, #login input{
+  background:var(--panel); color:var(--text); border:1px solid var(--line);
+  border-radius:9px; padding:6px 9px; font:inherit; font-size:12px; outline:none;
+}
+select{cursor:pointer}
+select:focus, #login input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+#login{display:none; padding:3px 4px 3px 11px}
+#login.on{display:inline-flex}
+#login input{width:132px; border-color:transparent; background:transparent}
+#login button{
+  background:var(--accent); color:#fff; border:0; border-radius:7px;
+  padding:6px 13px; font:inherit; font-size:12px; cursor:pointer;
+}
+#login button:hover{filter:brightness(1.08)}
+
+/* ---------- KPI 卡片 ---------- */
+/* 固定 4 张 KPI：只允许 1×4 或 2×2，禁止出现 3+1 的孤行 */
+.kpis{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:18px}
+.kpi{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px 18px 14px; box-shadow:var(--shadow); min-width:0;
+  display:flex; flex-direction:column;
+}
+.kpi-top{display:flex; align-items:center; justify-content:space-between; gap:8px}
+.kpi-label{font-size:11.5px; color:var(--muted); font-weight:600; letter-spacing:.7px; text-transform:uppercase}
+.kpi-tag{font-size:11px; color:var(--faint); white-space:nowrap}
+.kpi-value{
+  font-size:clamp(25px,1.5vw+19px,34px); font-weight:670; line-height:1.2;
+  margin:9px 0 3px; letter-spacing:-.6px; font-variant-numeric:tabular-nums;
+}
+.kpi-sub{
+  font-size:12px; color:var(--muted); line-height:1.45; min-height:2.9em;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2;
+  overflow:hidden; overflow-wrap:anywhere;
+}
+.bar{height:6px; background:var(--track); border-radius:99px; overflow:hidden; margin:13px 0 9px}
+.bar>i{display:block; height:100%; width:0; border-radius:99px; background:var(--accent); transition:width .45s ease}
+.bar>i.warn{background:var(--warn)} .bar>i.danger{background:var(--danger)}
+.kpi-foot{
+  font-size:11.5px; color:var(--faint); margin-top:auto; line-height:1.45;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2;
+  overflow:hidden; overflow-wrap:anywhere;
+}
+
+/* ---------- 面板 ---------- */
+.panels{display:grid; grid-template-columns:minmax(0,1.55fr) minmax(310px,1fr); gap:16px; align-items:start}
+.col{display:flex; flex-direction:column; gap:16px; min-width:0}
+section{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px 18px 14px; box-shadow:var(--shadow); min-width:0;
+}
+.sec-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:10px}
+h2{font-size:12px; margin:0; font-weight:650; color:var(--text); letter-spacing:.6px; text-transform:uppercase}
+h2::before{content:''; display:inline-block; width:3px; height:11px; border-radius:2px; background:var(--accent); margin-right:8px; vertical-align:-1px}
+.sec-meta{font-size:11.5px; color:var(--faint); white-space:nowrap}
+.scroll-hint{display:none}
+.tbl{overflow-x:auto; scrollbar-width:thin}
+table{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; font-size:12.5px}
+th,td{padding:9px 9px; white-space:nowrap; border-bottom:1px solid var(--line-soft); text-align:right}
+th:first-child,td:first-child{text-align:left; padding-left:2px}
+th{
+  font-size:10.5px; color:var(--faint); font-weight:600; letter-spacing:.5px; text-transform:uppercase;
+  background:var(--hover); border-bottom:1px solid var(--line); position:sticky; top:0;
+}
+thead th:first-child{border-top-left-radius:7px} thead th:last-child{border-top-right-radius:7px}
+tbody tr:hover{background:var(--hover)}
+tbody tr:last-child td{border-bottom:none}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; font-size:12px}
+.ellip{
+  display:inline-block; max-width:clamp(120px,17vw,280px);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom;
+}
+.num{font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px}
+.pill{
+  position:relative; display:inline-block; min-width:52px; text-align:right; padding:3px 8px;
+  border-radius:6px; font-size:11.5px; font-weight:600; background:var(--track); color:var(--muted);
+  font-variant-numeric:tabular-nums; overflow:hidden;
+}
+.pill::before{content:''; position:absolute; left:0; bottom:0; height:2px; width:var(--p,0%); background:currentColor; opacity:.55}
+.pill.warn{background:rgba(231,138,19,.13); color:var(--warn)}
+.pill.danger{background:rgba(224,72,61,.13); color:var(--danger)}
+.empty{color:var(--faint); font-size:12.5px; padding:16px 2px; text-align:center}
+.login-tip{color:var(--muted); font-size:12.5px; padding:14px 2px}
+
+/* 右侧信息表 */
+/* 标签列给足最小宽度，值列可收缩换行，避免长值把中文标签挤成竖排 */
+.kv{
+  display:grid; grid-template-columns:minmax(84px,auto) minmax(0,1fr);
+  column-gap:12px; align-items:start; font-size:12.5px;
+}
+.kv>div{padding:8px 2px; border-bottom:1px solid var(--line-soft); min-width:0}
+.kv>div:nth-child(odd){
+  color:var(--muted); line-height:1.45; max-height:2.9em;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2;
+  overflow:hidden; overflow-wrap:anywhere;
+}
+.kv>div:nth-last-child(-n+2){border-bottom:none}
+.kv .v{
+  text-align:right; font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-weight:600; overflow-wrap:anywhere; line-height:1.45;
+}
+.alerts{list-style:none; margin:0; padding:0; max-height:210px; overflow:auto; scrollbar-width:thin}
+.alerts li{padding:8px 2px; border-bottom:1px solid var(--line-soft); font-size:12px; line-height:1.5}
+.alerts li:last-child{border-bottom:none}
+.alerts .t{color:var(--faint); margin-right:8px; font-variant-numeric:tabular-nums}
+.alerts .w{color:var(--danger); font-weight:600} .alerts .o{color:var(--ok); font-weight:600}
+
+footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
+
+/* ---------- 响应式 ---------- */
+@media (max-width:1180px){
+  .panels{grid-template-columns:1fr}
+  /* 两块信息面板等高并排，告警独占第二行并横跨整宽，避免左列出现孤行空白 */
+  .col-side{
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-template-areas:"tcp host" "alerts alerts";
+    gap:16px; align-items:start;
+  }
+  .col-side>section:nth-child(1){grid-area:tcp}
+  .col-side>section:nth-child(2){grid-area:host}
+  .col-side>section:nth-child(3){grid-area:alerts}
+}
+/* 4 列放不下时直接降为 2×2，绝不停留在 3 列 */
+@media (max-width:900px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px){
+  .wrap{max-width:100%; padding:16px 14px 32px}
+  /* 单列时重置 align-items，否则继承上面 grid 的 start 会让面板按内容宽度收缩、宽度不齐 */
+  .col-side{display:flex; flex-direction:column; align-items:stretch; gap:16px}
+  .topbar{gap:10px}
+  .tools{margin-left:0; width:100%}
+  /* 窄屏让主机信息换行显示完整，而不是被省略号砍掉 */
+  .brand-sub{max-width:100%; white-space:normal; overflow:visible; text-overflow:clip; line-height:1.45}
+  .sec-head{flex-wrap:wrap; gap:2px 10px}
+  .has-tbl .scroll-hint{display:inline}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px}
+  .kpi{padding:13px 14px 12px}
+  .kpi-value{font-size:25px; margin:7px 0 2px}
+  section{padding:14px 13px 12px}
+  .ellip{max-width:150px}
+  table{font-size:12px}
+  th,td{padding:8px 7px}
+}
+@media (max-width:420px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .brand-sub{max-width:100%; white-space:normal; overflow:visible; text-overflow:clip}
+  .kpi-value{font-size:22px}
+  #login input{width:100px}
+}
+@media (min-width:1900px){
+  .wrap{max-width:1780px}
+  .kpis{gap:18px} .panels{gap:20px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">h</div>
+      <div class="brand-txt">
+        <div class="brand-title">hostmon <em>服务器监控</em></div>
+        <div class="brand-sub" id="hostline">正在连接…</div>
+      </div>
+    </div>
+    <div class="tools">
+      <div class="badge"><i class="dot" id="dot"></i><span id="status">连接中</span></div>
+      <div class="badge" id="login">
+        <span>令牌</span>
+        <input id="tokenInput" type="password" placeholder="web-token" autocomplete="off">
+        <button id="tokenBtn" type="button">连接</button>
+      </div>
+      <select id="refresh" title="刷新间隔">
+        <option value="1000">1s</option><option value="2000" selected>2s</option>
+        <option value="5000">5s</option><option value="10000">10s</option>
+      </select>
+    </div>
+  </header>
+
+  <div class="kpis" id="cards"></div>
+
+  <div class="panels">
+    <div class="col">
+      <section>
+        <div class="sec-head"><h2>文件系统</h2><span class="sec-meta has-tbl"><span id="mounts-meta">—</span><span class="scroll-hint"> · 横滑</span></span></div>
+        <div id="mounts" class="empty">加载中…</div>
+      </section>
+      <section>
+        <div class="sec-head"><h2>块设备 IO</h2><span class="sec-meta has-tbl"><span id="disks-meta">—</span><span class="scroll-hint"> · 横滑</span></span></div>
+        <div id="disks" class="empty">加载中…</div>
+      </section>
+      <section>
+        <div class="sec-head"><h2>网络接口</h2><span class="sec-meta has-tbl"><span id="nets-meta">—</span><span class="scroll-hint"> · 横滑</span></span></div>
+        <div id="nets" class="empty">加载中…</div>
+      </section>
+    </div>
+    <div class="col col-side">
+      <section>
+        <div class="sec-head"><h2>TCP / 进程</h2><span class="sec-meta" id="tcp-meta">—</span></div>
+        <div id="misc" class="empty">加载中…</div>
+      </section>
+      <section>
+        <div class="sec-head"><h2>主机信息</h2><span class="sec-meta">静态</span></div>
+        <div id="hostinfo" class="empty">加载中…</div>
+      </section>
+      <section>
+        <div class="sec-head"><h2>告警</h2><span class="sec-meta" id="alerts-meta">—</span></div>
+        <ul class="alerts" id="alerts"></ul>
+      </section>
+    </div>
+  </div>
+  <footer>纯 /proc 采集 · 零依赖 · <span id="stamp">—</span></footer>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+// 令牌优先取 URL（兼容 ?token=），存入 sessionStorage 后从地址栏清除，避免进入历史/访问日志。
+let authToken = qs.get('token') || sessionStorage.getItem('hostmon_token') || '';
+if(qs.get('token')){
+  try{
+    sessionStorage.setItem('hostmon_token',qs.get('token'));
+    history.replaceState(null,'',location.pathname);
+  }catch(e){/* file:// 下 replaceState 可能不可用 */}
+}
+function authFetch(p){
+  const opt={cache:'no-store'};
+  if(authToken)opt.headers={'Authorization':'Bearer '+authToken};
+  return fetch(p,opt);
+}
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n = (v,d=2) => Number(v||0).toFixed(d);
+function hb(v){v=Number(v||0);if(v<1024)return v.toFixed(0)+'B';const u='KMGTP';let i=-1;do{v/=1024;i++}while(v>=1024&&i<4);return v.toFixed(1)+u[i]}
+function level(p){return p>=90?'danger':p>=75?'warn':''}
+function ellip(s){return `<span class="mono ellip" title="${esc(s)}">${esc(s)}</span>`}
+function pill(p){
+  const c=level(p), w=Math.min(100,Math.max(0,Number(p)||0));
+  return `<span class="pill ${c}" style="--p:${w}%">${n(p)}%</span>`;
+}
+function card(label,value,sub,pct,foot,tag){
+  const cls=pct==null?'':level(pct);
+  const w=pct==null?0:Math.min(100,Math.max(0,Number(pct)||0));
+  const bar=pct==null?'':`<div class="bar"><i class="${cls}" style="width:${Math.max(w,1.5)}%"></i></div>`;
+  return `<article class="kpi">
+    <div class="kpi-top"><span class="kpi-label">${label}</span>${tag?`<span class="kpi-tag">${tag}</span>`:''}</div>
+    <div class="kpi-value">${value}</div>
+    <div class="kpi-sub" title="${esc(sub.replace(/<[^>]*>/g,''))}">${sub}</div>
+    ${bar}
+    <div class="kpi-foot" title="${esc((foot||'').replace(/<[^>]*>/g,''))}">${foot||''}</div>
+  </article>`;
+}
+function table(head,rows,emptyText){
+  if(!rows.length)return `<div class="empty">${emptyText||'暂无数据'}</div>`;
+  return `<div class="tbl"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.join('')}</tbody></table></div>`;
+}
+function kv(rows){
+  return `<div class="kv">${rows.map(([k,v])=>`<div>${esc(k)}</div><div class="v">${esc(v)}</div>`).join('')}</div>`;
+}
+
+function render(s){
+  const h=s.host||{}, c=s.cpu||{}, m=s.memory||{}, sw=s.swap||{}, l=s.load||{};
+  $('hostline').textContent =
+    `${h.hostname||'-'} · ${h.os||'-'} · ${h.arch||'-'} / ${h.cpus||c.cores?.length||0} CPU · 已运行 ${s.uptime?.human||'-'}`;
+  $('stamp').textContent = new Date(s.timestamp).toLocaleString('zh-CN') + ' · 采样窗口 ' + n(s.interval_sec) + 's';
+
+  $('cards').innerHTML =
+    card('CPU 使用率', n(c.usage_percent)+'%',
+      `usr ${n(c.user_percent)} · sys ${n(c.system_percent)} · iowait ${n(c.iowait_percent)}`,
+      c.usage_percent, `steal ${n(c.steal_percent)}% · ${c.cores?.length||h.cpus||0} 个逻辑核`, '实时') +
+    card('内存', n(m.usage_percent)+'%',
+      `${hb(m.used_bytes)} / ${hb(m.total_bytes)}`,
+      m.usage_percent, `可用 ${hb(m.available_bytes)} · 缓存 ${hb((m.buffers_bytes||0)+(m.cached_bytes||0))}`, '') +
+    card('Swap', n(sw.usage_percent)+'%',
+      `${hb(sw.used_bytes)} / ${hb(sw.total_bytes)}`,
+      sw.usage_percent, sw.total_bytes?`剩余 ${hb(sw.free_bytes)}`:'未启用 Swap', '') +
+    card('系统负载', n(l.load1),
+      `5m ${n(l.load5)} · 15m ${n(l.load15)}`,
+      (l.per_core_load1||0)*50, `每核 ${n(l.per_core_load1)} · 进程 ${s.processes?.total||0}`, '1m');
+
+  const mounts=s.mounts||[];
+  $('mounts-meta').textContent=`${mounts.length} 个挂载点`;
+  $('mounts').innerHTML = table(['挂载点','类型','总量','已用','可用','使用率','Inode'],
+    mounts.map(x=>`<tr><td>${ellip(x.mount_point)}</td><td>${esc(x.fs_type)}</td>
+      <td class="num">${hb(x.total_bytes)}</td><td class="num">${hb(x.used_bytes)}</td>
+      <td class="num">${hb(x.available_bytes)}</td><td>${pill(x.usage_percent)}</td>
+      <td class="num">${n(x.inodes_usage_percent)}%</td></tr>`),'未发现可统计的文件系统');
+
+  const disks=(s.disk_io||[]).filter(d=>!/^(loop|ram|zram|fd)/.test(d.device));
+  $('disks-meta').textContent=`${disks.length} 个设备`;
+  $('disks').innerHTML = table(['设备','读/s','写/s','读吞吐','写吞吐','BUSY','延迟'],
+    disks.slice(0,12).map(d=>`<tr><td>${ellip(d.device)}</td>
+      <td class="num">${n(d.read_iops,1)}</td><td class="num">${n(d.write_iops,1)}</td>
+      <td class="num">${hb(d.read_bytes_per_sec)}/s</td><td class="num">${hb(d.write_bytes_per_sec)}/s</td>
+      <td>${pill(d.util_percent)}</td><td class="num">${n(d.avg_latency_ms)}ms</td></tr>`),'暂无块设备 IO 数据');
+
+  const nets=s.network||[];
+  $('nets-meta').textContent=`${nets.length} 个接口`;
+  $('nets').innerHTML = table(['接口','下行','上行','收包/s','发包/s','错包 / 丢包'],
+    nets.slice(0,12).map(x=>`<tr><td>${ellip(x.interface)}</td>
+      <td class="num">${hb(x.rx_bytes_per_sec)}/s</td><td class="num">${hb(x.tx_bytes_per_sec)}/s</td>
+      <td class="num">${n(x.rx_packets_per_sec,0)}</td><td class="num">${n(x.tx_packets_per_sec,0)}</td>
+      <td class="num">${x.rx_errors_total||0} / ${x.rx_dropped_total||0}</td></tr>`),'暂无网络接口数据');
+
+  const t=s.tcp||{}, p=s.processes||{};
+  $('tcp-meta').textContent=`${t.total||0} 条连接`;
+  $('misc').innerHTML = kv([
+    ['已建立 ESTABLISHED',t.established||0], ['监听 LISTEN',t.listen||0],
+    ['TIME_WAIT',t.time_wait||0], ['SYN_SENT / SYN_RECV',`${t.syn_sent||0} / ${t.syn_recv||0}`],
+    ['CLOSE_WAIT',t.close_wait||0], ['连接总数',t.total||0],
+    ['进程总数 / 运行中',`${p.total||0} / ${p.running||0}`], ['累计 fork',p.created_total||0]
+  ]);
+  $('hostinfo').innerHTML = kv([
+    ['主机名',h.hostname||'-'], ['操作系统',h.os||'-'],
+    ['内核',h.kernel||'-'], ['架构',`${h.arch||'-'} / ${h.cpus||0} 核`],
+    ['CPU 型号',h.cpu_model||'-'], ['启动时间',s.uptime?.boot_time?new Date(s.uptime.boot_time).toLocaleString('zh-CN'):'-'],
+    ['采样窗口',n(s.interval_sec)+'s'], ['数据时间',new Date(s.timestamp).toLocaleTimeString('zh-CN')]
+  ]);
+}
+
+function renderAlerts(evs){
+  $('alerts-meta').textContent=evs&&evs.length?`${evs.length} 条`:'无';
+  if(!evs||!evs.length){$('alerts').innerHTML='<li class="empty">暂无告警</li>';return}
+  $('alerts').innerHTML = evs.slice().reverse().slice(0,20).map(e=>
+    `<li><span class="t">${esc(new Date(e.time).toLocaleTimeString('zh-CN'))}</span><span class="${e.level==='OK'?'o':'w'}">${e.level==='OK'?'[OK]':'[WARN]'}</span> ${esc(e.message)}</li>`).join('');
+}
+
+// 直接用 file:// 打开、或静态预览服务没有后端时，展示一组示例数据。
+const DEMO={
+  timestamp:'2026-11-05T15:42:00+08:00',interval_sec:5,
+  host:{hostname:'jaganshibj',os:'Anolis OS 8.10',kernel:'5.10.134-13.1.an8.x86_64',arch:'x86_64',cpus:4,cpu_model:'Intel(R) Xeon(R) CPU E3-1220 v6 @ 3.00GHz'},
+  uptime:{human:'20d 5h 26m',boot_time:'2026-10-16T10:16:00+08:00'},
+  cpu:{usage_percent:0.30,user_percent:0.10,system_percent:0.10,iowait_percent:0.00,steal_percent:0,
+       cores:[{id:'0',usage:0.5},{id:'1',usage:0.2},{id:'2',usage:0.3},{id:'3',usage:0.2}]},
+  memory:{usage_percent:26.58,used_bytes:981*2**20,total_bytes:3692*2**20,available_bytes:2711*2**20,buffers_bytes:120*2**20,cached_bytes:1900*2**20},
+  swap:{usage_percent:0,used_bytes:0,total_bytes:0,free_bytes:0},
+  load:{load1:0.00,load5:0.00,load15:0.00,per_core_load1:0.00},
+  mounts:[
+    {mount_point:'/',fs_type:'xfs',total_bytes:45.1*2**30,used_bytes:20*2**30,available_bytes:24.65*2**30,usage_percent:45.22,inodes_usage_percent:1.58},
+    {mount_point:'/app/docker/data/overlay2/6c7582d66b9e6ffec2a8fb7d0fbc7bd3f3794185185c27f3d6f4ac7e7f/merged',fs_type:'overlay',total_bytes:45.1*2**30,used_bytes:20*2**30,available_bytes:24.65*2**30,usage_percent:45.22,inodes_usage_percent:1.58},
+    {mount_point:'/boot',fs_type:'xfs',total_bytes:1014*2**20,used_bytes:244*2**20,available_bytes:700*2**20,usage_percent:24.66,inodes_usage_percent:0.06}
+  ],
+  disk_io:[
+    {device:'sda',read_iops:0,write_iops:1.5,read_bytes_per_sec:0,write_bytes_per_sec:32*2**10,util_percent:1.2,avg_latency_ms:0.3},
+    {device:'sda1',read_iops:0,write_iops:0.4,read_bytes_per_sec:0,write_bytes_per_sec:8*2**10,util_percent:0.4,avg_latency_ms:0.2},
+    {device:'sda2',read_iops:0,write_iops:1.1,read_bytes_per_sec:0,write_bytes_per_sec:24*2**10,util_percent:0.9,avg_latency_ms:0.25},
+    {device:'dm-0',read_iops:0,write_iops:1.1,read_bytes_per_sec:0,write_bytes_per_sec:24*2**10,util_percent:0.9,avg_latency_ms:0.3},
+    {device:'sr0',read_iops:0,write_iops:0,read_bytes_per_sec:0,write_bytes_per_sec:0,util_percent:0,avg_latency_ms:0}
+  ],
+  network:[{interface:'ens32',rx_bytes_per_sec:1.2*2**20,tx_bytes_per_sec:5.7*2**20,rx_packets_per_sec:8,tx_packets_per_sec:8,rx_errors_total:0,rx_dropped_total:0}],
+  tcp:{established:3,listen:17,time_wait:0,syn_sent:0,syn_recv:0,close_wait:0,total:20},
+  processes:{total:468,running:1,created_total:19496}
+};
+const DEMO_ALERTS=[
+  {time:'2026-11-05T15:31:02+08:00',level:'OK',message:'CPU usage recovered: 12.10% (threshold 85.00%)'},
+  {time:'2026-11-05T15:20:11+08:00',level:'WARN',message:'mount /app/docker/data usage still high: 91.20% >= 90.00%'}
+];
+let everOK=false;
+function demoMode(){
+  render(DEMO);renderAlerts(DEMO_ALERTS);
+  $('dot').classList.add('off');$('status').textContent='离线演示';
+  $('stamp').textContent+=' · 离线示例数据，连接 hostmon 后为真实指标';
+}
+function showLogin(){
+  $('login').classList.add('on');
+  $('dot').classList.add('off');$('status').textContent='需要令牌';
+  $('hostline').textContent='数据接口受保护，请输入启动时的 -web-token 后点「连接」';
+  for(const id of ['mounts','disks','nets','misc','hostinfo']){
+    $(id).innerHTML='<div class="login-tip">输入访问令牌后显示实时数据</div>';
+  }
+}
+async function tick(){
+  try{
+    const [r1,r2] = await Promise.all([authFetch('/api/v1/metrics'),authFetch('/api/v1/alerts')]);
+    if(r1.status===401 || r2.status===401){showLogin();return}
+    if(!r1.ok)throw new Error('HTTP '+r1.status);
+    render(await r1.json());
+    if(r2.ok)renderAlerts(await r2.json());
+    everOK=true;
+    $('login').classList.remove('on');
+    $('dot').classList.remove('off');$('status').textContent='采集中';
+  }catch(e){
+    // 首次连接失败（双击打开 HTML、或静态预览服务没有后端）时展示示例数据。
+    if(!everOK){demoMode();return}
+    $('dot').classList.add('off');$('status').textContent='连接失败';
+    $('hostline').textContent=String(e.message||e);
+  }
+}
+let timer;
+function schedule(){clearInterval(timer);timer=setInterval(tick,Number($('refresh').value))}
+$('refresh').addEventListener('change',()=>{if(location.protocol!=='file:'){schedule();tick()}});
+$('tokenBtn').addEventListener('click',()=>{
+  const v=$('tokenInput').value.trim();
+  if(!v)return;
+  authToken=v;
+  try{sessionStorage.setItem('hostmon_token',v)}catch(e){}
+  everOK=false;
+  tick();
+});
+$('tokenInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('tokenBtn').click()});
+if(location.protocol==='file:' || qs.has('demo')){
+  demoMode();
+}else{
+  schedule();tick();
+}
+</script>
+</body>
+</html>

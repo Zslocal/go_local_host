@@ -1,0 +1,8 @@
+/dist/
+*.log
+*.jsonl
+/hostmon
+/hostmon.exe
+.env
+# WorkBuddy 本地工作区数据（含私有笔记），不进版本库
+.workbuddy/

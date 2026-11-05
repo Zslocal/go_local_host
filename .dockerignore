@@ -1,0 +1,6 @@
+.git
+.workbuddy
+*.log
+*.jsonl
+*.exe
+.env
