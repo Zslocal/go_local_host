@@ -25,7 +25,7 @@ docker-compose.yml                # 最小权限、宿主机视角的容器部�
 
 ## 编译
 
-源码仓库：<https://github.com/Zslocal/go_local_host>，当前版本 `v0.1.2`（含进程 CPU / 内存 Top N 榜单）。module path 已与仓库一致，克隆后即可编译：
+源码仓库：<https://github.com/Zslocal/go_local_host>，当前版本 `v0.1.3`（进程 CPU / 内存 Top N 榜单，含启动命令列）。module path 已与仓库一致，克隆后即可编译：
 
 ```bash
 git clone https://github.com/Zslocal/go_local_host.git
@@ -42,12 +42,12 @@ bash build.sh                 # 产出 dist/hostmon-linux-amd64 与 dist/hostmon
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath \
-  -ldflags "-s -w -X main.version=0.1.2" -o hostmon ./cmd/hostmon
+  -ldflags "-s -w -X main.version=0.1.3" -o hostmon ./cmd/hostmon
 ```
 
 ```powershell
 $env:CGO_ENABLED="0"; $env:GOOS="linux"; $env:GOARCH="arm64"
-go build -trimpath -ldflags "-s -w -X main.version=0.1.2" -o hostmon ./cmd/hostmon
+go build -trimpath -ldflags "-s -w -X main.version=0.1.3" -o hostmon ./cmd/hostmon
 ```
 
 部署：
@@ -94,13 +94,13 @@ DISK      r/s    w/s    READ/s   WRITE/s  IOPS  UTIL%  LAT(ms)
 NET       RX/s     TX/s     RXpkt/s  TXpkt/s  RX ERR/DROP (total)
   eth0     1.2M/s   800.0K/s 1200     900      0 / 0
 
-TOP CPU        CPU%    MEM%   RSS     THR  USER      STATE
-  1421 java    137.42  12.50  512.0M  86   app       R
-  998 dockerd  4.12    1.80   74.0M   24   root      S
-TOP MEM        CPU%    MEM%   RSS     THR  USER      STATE
-  1421 java    137.42  12.50  512.0M  86   app       R
-  2210 postgres 2.55   3.40   139.0M  9    postgres  S
-  （共扫描 468 个进程，100% CPU = 1 个逻辑核；明细可用 -format json 获取 cmdline）
+TOP CPU        CPU%    MEM%   RSS     THR  USER      STATE  CMD
+  1421 java    137.42  12.50  512.0M  86   app       R      java -Xms512m -Xmx512m -jar /opt/app/app.jar --spring.profiles.active=prod
+  998 dockerd  4.12    1.80   74.0M   24   root      S      /usr/bin/dockerd --config-file=/etc/docker/daemon.json --data-root=/app/docker/data
+TOP MEM        CPU%    MEM%   RSS     THR  USER      STATE  CMD
+  1421 java    137.42  12.50  512.0M  86   app       R      java -Xms512m -Xmx512m -jar /opt/app/app.jar --spring.profiles.active=prod
+  2210 postgres 2.55   3.40   139.0M  9    postgres  S      postgres -D /var/lib/pgsql/data
+  （共扫描 468 个进程，100% CPU = 1 个逻辑核；CMD 超过 72 字符会截断，完整命令行见 -format json 的 cmdline）
 
 TCP       estab 128 | listen 24 | time_wait 42 | total 200
 ```
@@ -171,7 +171,7 @@ server {
 
 鉴权边界：`/` 是纯静态 HTML、不含任何主机数据，所以放行；`/api/v1/*` 和 `/metrics` 严格校验令牌；`/healthz` 不做鉴权（供探针使用），不要把它暴露到公网。
 
-仪表盘响应式：顶部 4 张 KPI 卡片固定只有两种排布 —— 视口 ≥901px 为 **1×4**，≤900px 为 **2×2**，不会出现 3+1 的孤行；主内容在 1180px 以下改单栏，侧栏为「TCP/进程 + 主机信息」等高并排、「告警」横跨整宽，因此不会出现孤行空白；底部「进程 · CPU 榜 / 内存榜」两块等宽并排，≤900px 堆叠为整宽；760px 以下全部单栏、表格可横向滚动并显示「横滑」提示，390px 手机宽度同样可用。信息表（`.kv`）标签列最小 84px、最多两行，长值自动换行，避免中文标签被挤成竖排。
+仪表盘响应式：顶部 4 张 KPI 卡片固定只有两种排布 —— 视口 ≥901px 为 **1×4**，≤900px 为 **2×2**，不会出现 3+1 的孤行；主内容在 1180px 以下改单栏，侧栏为「TCP/进程 + 主机信息」等高并排、「告警」横跨整宽，因此不会出现孤行空白；底部「进程 · CPU 榜 / 内存榜」两块等宽并排，**≤1180px 堆叠为整宽**（8 列含启动命令，半宽面板放不下，堆叠后约 870px 可读）；启动命令列吃掉剩余宽度并单行省略，悬停 `title` 看全文；760px 以下全部单栏、表格可横向滚动并显示「横滑」提示，390px 手机宽度同样可用。信息表（`.kv`）标签列最小 84px、最多两行，长值自动换行，避免中文标签被挤成竖排。
 
 ## Prometheus / Grafana
 
@@ -417,6 +417,24 @@ bash build.sh                 # 交叉编译并输出 SHA256
 ```
 
 ## 版本变更
+
+### v0.1.3（2026-11-06）
+
+进程榜单新增**启动命令列**，一眼看清「这个高 CPU 的 java 到底跑的哪个 jar」。
+
+| 项 | 说明 |
+|---|---|
+| 文本输出 | `TOP CPU` / `TOP MEM` 末尾追加 `CMD` 列，超过 72 字符截断为 `…`（终端里过长会挤爆表格）；连续空白/换行折叠成单个空格 |
+| 内核线程 | 没有 `cmdline` 的进程按 `ps` 惯例显示为 `[comm]`，例如 `[kworker/0:2]`，不会留下突兀的空列 |
+| 仪表盘 | 两块榜单各加一列「启动命令」，吃掉剩余宽度并单行省略，悬停看完整命令；8 列在半宽面板里放不下，榜单堆叠断点从 900px 提前到 **1180px** |
+| JSON | 沿用既有 `processes.top_cpu[].cmdline` 字段（无破坏性变更），仍截断到 120 字符 |
+| 采集开销 | 不变：`cmdline` 依旧只对入选榜单的进程读取，不遍历全表 |
+| 测试 | 24 → **25 组**：新增 `clipCmd` 用例（空白折叠、内核线程回退、按 rune 而非 byte 截断中文、`max<=0` 不截断），文本断言覆盖 `CMD` 列与 `[comm]` 回退 |
+
+```bash
+hostmon -once                                  # 文本：两个榜单都带 CMD 列
+hostmon -format json -once | jq -r '.processes.top_cpu[] | "\(.pid)\t\(.cpu_percent)\t\(.cmdline)"'
+```
 
 ### v0.1.2（2026-11-06）
 

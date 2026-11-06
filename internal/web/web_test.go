@@ -40,6 +40,10 @@ func TestEndpointsWithoutToken(t *testing.T) {
 		{"/", 200, "进程 · CPU 榜"},
 		{"/", 200, "进程 · 内存榜"},
 		{"/", 200, "proccpu"},
+		// 启动命令列：表头、单元格类名、内核线程回退写法
+		{"/", 200, "启动命令"},
+		{"/", 200, "cmdcell"},
+		{"/", 200, "[${x.name"},
 		{"/api/v1/metrics", 200, `"hostname":"node-01"`},
 		{"/api/v1/alerts", 200, "cpu high"},
 		{"/metrics", 200, "hostmon_up 1"},

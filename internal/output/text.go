@@ -20,6 +20,9 @@ func DefaultTextOptions() TextOptions {
 	return TextOptions{MaxMounts: 8, MaxDisks: 6, MaxNets: 6}
 }
 
+// cmdWidth 是终端里 CMD 列的显示宽度（字符数）。完整命令行在 JSON / 仪表盘里。
+const cmdWidth = 72
+
 // Text 把快照渲染成一份可直接阅读、也可重定向到日志的纯文本报告。
 func Text(w io.Writer, s *monitor.Snapshot, opt TextOptions) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -114,19 +117,20 @@ func Text(w io.Writer, s *monitor.Snapshot, opt TextOptions) error {
 	// 进程榜单：CPU 与内存各一屏，100% = 1 个逻辑核（与 top 口径一致）
 	p := s.Processes
 	if len(p.TopCPU) > 0 || len(p.TopMem) > 0 {
-		fmt.Fprintf(tw, "TOP CPU\tCPU%%\tMEM%%\tRSS\tTHR\tUSER\tSTATE\n")
+		fmt.Fprintf(tw, "TOP CPU\tCPU%%\tMEM%%\tRSS\tTHR\tUSER\tSTATE\tCMD\n")
 		for _, x := range p.TopCPU {
-			fmt.Fprintf(tw, "  %d %s\t%.2f\t%.2f\t%s\t%d\t%s\t%s\n",
+			fmt.Fprintf(tw, "  %d %s\t%.2f\t%.2f\t%s\t%d\t%s\t%s\t%s\n",
 				x.PID, clipName(x.Name), x.CPU, x.Mem, humanBytes(x.RSS), x.Threads,
-				empty(x.User, "-"), empty(x.State, "-"))
+				empty(x.User, "-"), empty(x.State, "-"), clipCmd(x.Cmdline, x.Name, cmdWidth))
 		}
-		fmt.Fprintf(tw, "TOP MEM\tCPU%%\tMEM%%\tRSS\tTHR\tUSER\tSTATE\n")
+		fmt.Fprintf(tw, "TOP MEM\tCPU%%\tMEM%%\tRSS\tTHR\tUSER\tSTATE\tCMD\n")
 		for _, x := range p.TopMem {
-			fmt.Fprintf(tw, "  %d %s\t%.2f\t%.2f\t%s\t%d\t%s\t%s\n",
+			fmt.Fprintf(tw, "  %d %s\t%.2f\t%.2f\t%s\t%d\t%s\t%s\t%s\n",
 				x.PID, clipName(x.Name), x.CPU, x.Mem, humanBytes(x.RSS), x.Threads,
-				empty(x.User, "-"), empty(x.State, "-"))
+				empty(x.User, "-"), empty(x.State, "-"), clipCmd(x.Cmdline, x.Name, cmdWidth))
 		}
-		fmt.Fprintf(tw, "  （共扫描 %d 个进程，100%% CPU = 1 个逻辑核；明细可用 -format json 获取 cmdline）\n\n", p.Scanned)
+		fmt.Fprintf(tw, "  （共扫描 %d 个进程，100%% CPU = 1 个逻辑核；CMD 超过 %d 字符会截断，完整命令行见 -format json 的 cmdline）\n\n",
+			p.Scanned, cmdWidth)
 	}
 
 	fmt.Fprintf(tw, "TCP\t estab %d | listen %d | time_wait %d | syn_sent %d | syn_recv %d | close_wait %d | total %d\n",
@@ -149,6 +153,20 @@ func clipName(name string) string {
 	r := []rune(empty(name, "?"))
 	if len(r) > 20 {
 		return string(r[:19]) + "…"
+	}
+	return string(r)
+}
+
+// clipCmd 把启动命令压成单行并限制宽度，避免长命令行把终端表格撑得无法阅读。
+// 内核线程没有 cmdline，按 ps 的惯例显示为 [comm]。
+func clipCmd(cmd, name string, max int) string {
+	cmd = strings.Join(strings.Fields(cmd), " ")
+	if cmd == "" {
+		return "[" + empty(name, "?") + "]"
+	}
+	r := []rune(cmd)
+	if max > 0 && len(r) > max {
+		return string(r[:max-1]) + "…"
 	}
 	return string(r)
 }

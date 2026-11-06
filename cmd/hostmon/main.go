@@ -22,7 +22,7 @@ import (
 	"github.com/Zslocal/go_local_host/internal/web"
 )
 
-var version = "dev" // 可用 -ldflags "-X main.version=0.1.2" 注入
+var version = "dev" // 可用 -ldflags "-X main.version=0.1.3" 注入
 
 type options struct {
 	interval  time.Duration

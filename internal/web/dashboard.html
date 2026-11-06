@@ -132,6 +132,15 @@ tbody tr:last-child td{border-bottom:none}
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom;
 }
 .num{font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px}
+/* 启动命令列：左对齐 + 单行省略，完整命令放在 title 里悬停可见。
+   max-width:0 + width:100% 让这一列吃掉剩余宽度，长命令行不会把表格撑出面板。 */
+.cmdcell{text-align:left; width:100%; max-width:0}
+.cmd{
+  display:block; max-width:100%;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+/* 进程榜 8 列较挤，收紧左右内边距，把省下来的宽度让给启动命令 */
+#proccpu th,#proccpu td,#procmem th,#procmem td{padding-left:6px; padding-right:6px}
 .pill{
   position:relative; display:inline-block; min-width:52px; text-align:right; padding:3px 8px;
   border-radius:6px; font-size:11.5px; font-weight:600; background:var(--track); color:var(--muted);
@@ -174,6 +183,8 @@ footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
 /* ---------- 响应式 ---------- */
 @media (max-width:1180px){
   .panels{grid-template-columns:1fr}
+  /* 8 列的进程榜在半宽面板里放不下，与主内容同步降为单栏（全宽后面板约 870px，八列可读） */
+  .proc-grid{grid-template-columns:1fr}
   /* 两块信息面板等高并排，告警独占第二行并横跨整宽，避免左列出现孤行空白 */
   .col-side{
     display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
@@ -187,7 +198,6 @@ footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
 /* 4 列放不下时直接降为 2×2，绝不停留在 3 列 */
 @media (max-width:900px){
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .proc-grid{grid-template-columns:1fr}
 }
 @media (max-width:760px){
   .wrap{max-width:100%; padding:16px 14px 32px}
@@ -327,7 +337,9 @@ function card(label,value,sub,pct,foot,tag){
 }
 function table(head,rows,emptyText){
   if(!rows.length)return `<div class="empty">${emptyText||'暂无数据'}</div>`;
-  return `<div class="tbl"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+  // 表头项可以是纯字符串，也可以是 {t: 文本, c: 类名}，后者用于给个别列定制对齐/宽度
+  const th=head.map(h=>typeof h==='string'?`<th>${h}</th>`:`<th class="${h.c||''}">${h.t}</th>`).join('');
+  return `<div class="tbl"><table><thead><tr>${th}</tr></thead>
     <tbody>${rows.join('')}</tbody></table></div>`;
 }
 function kv(rows){
@@ -397,15 +409,21 @@ function render(s){
   const topCPU=p.top_cpu||[], topMem=p.top_mem||[];
   $('proccpu-meta').textContent=`前 ${topCPU.length} / 扫描 ${p.scanned||0} 个`;
   $('procmem-meta').textContent=`前 ${topMem.length} / 扫描 ${p.scanned||0} 个`;
-  const procRows = list => list.map(x=>`<tr>
+  // 内核线程没有 cmdline，按 ps 的惯例显示为 [comm]
+  const procCmd = x => (x.cmdline||'').trim() || `[${x.name||'?'}]`;
+  const procRows = list => list.map(x=>{
+    const cmd = procCmd(x);
+    return `<tr>
       <td class="num">${x.pid}</td>
-      <td><span class="mono ellip" title="${esc(x.cmdline||x.name)}">${esc(x.name)}</span></td>
+      <td><span class="mono ellip" title="${esc(cmd)}">${esc(x.name)}</span></td>
       <td class="num">${n(x.cpu_percent)}%</td>
       <td>${pill(x.mem_percent)}</td>
       <td class="num">${hb(x.rss_bytes)}</td>
       <td class="num">${x.threads||0}</td>
-      <td>${esc(x.user||'-')}</td></tr>`);
-  const procHead=['PID','进程','CPU%','内存%','常驻内存','线程','用户'];
+      <td>${esc(x.user||'-')}</td>
+      <td class="cmdcell"><span class="mono cmd" title="${esc(cmd)}">${esc(cmd)}</span></td></tr>`;
+  });
+  const procHead=['PID','进程','CPU%','内存%','常驻内存','线程','用户',{t:'启动命令',c:'cmdcell'}];
   $('proccpu').innerHTML = table(procHead, procRows(topCPU), '暂无进程数据（启动时用 -proc-top 0 会关闭采集）');
   $('procmem').innerHTML = table(procHead, procRows(topMem), '暂无进程数据（启动时用 -proc-top 0 会关闭采集）');
 }
@@ -443,16 +461,17 @@ const DEMO={
   tcp:{established:3,listen:17,time_wait:0,syn_sent:0,syn_recv:0,close_wait:0,total:20},
   processes:{total:468,running:1,created_total:19496,scanned:468,
     top_cpu:[
-      {pid:1421,name:'java',user:'app',state:'R',cpu_percent:37.42,mem_percent:12.5,rss_bytes:512*2**20,threads:86,cmdline:'java -Xms512m -jar app.jar'},
-      {pid:998,name:'dockerd',user:'root',state:'S',cpu_percent:4.12,mem_percent:1.8,rss_bytes:74*2**20,threads:24},
-      {pid:2210,name:'postgres',user:'postgres',state:'S',cpu_percent:2.55,mem_percent:3.4,rss_bytes:139*2**20,threads:9},
-      {pid:877,name:'node_exporter',user:'prometheus',state:'S',cpu_percent:0.85,mem_percent:0.3,rss_bytes:12*2**20,threads:7}
+      {pid:1421,name:'java',user:'app',state:'R',cpu_percent:37.42,mem_percent:12.5,rss_bytes:512*2**20,threads:86,cmdline:'java -Xms512m -Xmx512m -jar /opt/app/app.jar --spring.profiles.active=prod'},
+      {pid:998,name:'dockerd',user:'root',state:'S',cpu_percent:4.12,mem_percent:1.8,rss_bytes:74*2**20,threads:24,cmdline:'/usr/bin/dockerd --config-file=/etc/docker/daemon.json --data-root=/app/docker/data'},
+      {pid:2210,name:'postgres',user:'postgres',state:'S',cpu_percent:2.55,mem_percent:3.4,rss_bytes:139*2**20,threads:9,cmdline:'postgres -D /var/lib/pgsql/data'},
+      {pid:877,name:'node_exporter',user:'prometheus',state:'S',cpu_percent:0.85,mem_percent:0.3,rss_bytes:12*2**20,threads:7,cmdline:'/usr/local/bin/node_exporter --collector.systemd'},
+      {pid:312,name:'kworker/0:2',user:'root',state:'S',cpu_percent:0.12,mem_percent:0.0,rss_bytes:0,threads:1}
     ],
     top_mem:[
-      {pid:1421,name:'java',user:'app',state:'R',cpu_percent:37.42,mem_percent:12.5,rss_bytes:512*2**20,threads:86,cmdline:'java -Xms512m -jar app.jar'},
-      {pid:2210,name:'postgres',user:'postgres',state:'S',cpu_percent:2.55,mem_percent:3.4,rss_bytes:139*2**20,threads:9},
-      {pid:998,name:'dockerd',user:'root',state:'S',cpu_percent:4.12,mem_percent:1.8,rss_bytes:74*2**20,threads:24},
-      {pid:3011,name:'minio',user:'root',state:'S',cpu_percent:0.42,mem_percent:1.5,rss_bytes:61*2**20,threads:18}
+      {pid:1421,name:'java',user:'app',state:'R',cpu_percent:37.42,mem_percent:12.5,rss_bytes:512*2**20,threads:86,cmdline:'java -Xms512m -Xmx512m -jar /opt/app/app.jar --spring.profiles.active=prod'},
+      {pid:2210,name:'postgres',user:'postgres',state:'S',cpu_percent:2.55,mem_percent:3.4,rss_bytes:139*2**20,threads:9,cmdline:'postgres -D /var/lib/pgsql/data'},
+      {pid:998,name:'dockerd',user:'root',state:'S',cpu_percent:4.12,mem_percent:1.8,rss_bytes:74*2**20,threads:24,cmdline:'/usr/bin/dockerd --config-file=/etc/docker/daemon.json --data-root=/app/docker/data'},
+      {pid:3011,name:'minio',user:'root',state:'S',cpu_percent:0.42,mem_percent:1.5,rss_bytes:61*2**20,threads:18,cmdline:'minio server /data --address :9000 --console-address :9001'}
     ]
   }
 };

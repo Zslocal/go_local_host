@@ -5,15 +5,17 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # 默认版本号与 git tag 保持一致；发布新版本时可 VERSION=v0.2.0 bash build.sh
-VERSION="${VERSION:-0.1.2}"
+VERSION="${VERSION:-0.1.3}"
 OUT="dist"
 mkdir -p "$OUT"
 
 build() {
   local goarch="$1" out="$OUT/hostmon-linux-$1"
   echo "==> building linux/$goarch ..."
+  # -buildvcs=false：不把 git 提交号/「dirty」标记烧进二进制，
+  # 这样工作区有未提交改动时编出来的产物与 tag 版本行为一致，且可复现。
   CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" \
-    go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+    go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$VERSION" \
     -o "$out" ./cmd/hostmon
   local size
   size=$(du -h "$out" | cut -f1)
