@@ -132,9 +132,31 @@ tbody tr:last-child td{border-bottom:none}
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom;
 }
 .num{font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px}
-/* 启动命令列：左对齐 + 单行省略，完整命令放在 title 里悬停可见。
-   max-width:0 + width:100% 让这一列吃掉剩余宽度，长命令行不会把表格撑出面板。 */
-.cmdcell{text-align:left; width:100%; max-width:0}
+/* ---------- 进程榜：固定列宽占比 --------------
+   table-layout:fixed + 百分比列宽，列宽只跟面板宽度有关，
+   不随进程名/命令/用户名长短变化；两块榜单的列也严格对齐。
+   容器窄于 720px 时表格横向滚动（沿用 .tbl 的 overflow-x）。 */
+#proccpu table,#procmem table{table-layout:fixed; width:100%; min-width:620px}
+#proccpu th:nth-child(1),#procmem th:nth-child(1){width:7%}   /* PID */
+#proccpu th:nth-child(2),#procmem th:nth-child(2){width:18%}  /* 进程 */
+#proccpu th:nth-child(3),#procmem th:nth-child(3){width:9%}   /* CPU% */
+#proccpu th:nth-child(4),#procmem th:nth-child(4){width:11%}  /* 内存% */
+#proccpu th:nth-child(5),#procmem th:nth-child(5){width:10%}  /* 常驻内存 */
+#proccpu th:nth-child(6),#procmem th:nth-child(6){width:7%}   /* 线程 */
+#proccpu th:nth-child(7),#procmem th:nth-child(7){width:13%}  /* 用户 */
+#proccpu th:nth-child(8),#procmem th:nth-child(8){width:25%}  /* 启动命令 */
+/* 名称/用户名左对齐，数字列保持右对齐 */
+#proccpu th:nth-child(2),#procmem th:nth-child(2),
+#proccpu td:nth-child(2),#procmem td:nth-child(2),
+#proccpu th:nth-child(7),#procmem th:nth-child(7),
+#proccpu td:nth-child(7),#procmem td:nth-child(7){text-align:left}
+/* 固定列宽后，超长内容一律单行省略，不允许把列撑开 */
+#proccpu th,#procmem th,#proccpu td,#procmem td{overflow:hidden; text-overflow:ellipsis}
+#proccpu td .ellip,#procmem td .ellip{display:block; max-width:none}
+/* 内存% 的胶囊在窄列里要收得下 */
+#proccpu .pill,#procmem .pill{min-width:44px; padding:3px 5px}
+/* 启动命令列：左对齐 + 单行省略，完整命令放在 title 里悬停可见 */
+.cmdcell{text-align:left}
 .cmd{
   display:block; max-width:100%;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -176,15 +198,18 @@ tbody tr:last-child td{border-bottom:none}
 .alerts .w{color:var(--danger); font-weight:600} .alerts .o{color:var(--ok); font-weight:600}
 
 /* 进程榜单：两块等宽面板，窄屏自动堆叠 */
-.proc-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:16px}
+/* 进程榜默认整宽单栏：8 列固定占比后，半宽面板里每列只剩几十像素，读不了；
+   只有在大屏（≥1400px，每块面板 ≥670px）才回到并排。 */
+.proc-grid{display:grid; grid-template-columns:1fr; gap:16px; margin-top:16px}
+@media (min-width:1400px){
+  .proc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 
 footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
 
 /* ---------- 响应式 ---------- */
 @media (max-width:1180px){
   .panels{grid-template-columns:1fr}
-  /* 8 列的进程榜在半宽面板里放不下，与主内容同步降为单栏（全宽后面板约 870px，八列可读） */
-  .proc-grid{grid-template-columns:1fr}
   /* 两块信息面板等高并排，告警独占第二行并横跨整宽，避免左列出现孤行空白 */
   .col-side{
     display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
