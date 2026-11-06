@@ -1,6 +1,6 @@
 # hostmon · Linux 服务器监控采集器
 
-用 Go 写的单文件、零第三方依赖监控程序，采集 **CPU、内存、Swap、磁盘容量与 IO、网络流量、TCP 连接、系统负载与运行时间**。所有数据直接读 `/proc` 与 `statfs(2)`，不调用 `top`/`free`/`df`/`iostat` 等外部命令，也不需要 root 权限。
+用 Go 写的单文件、零第三方依赖监控程序，采集 **CPU、内存、Swap、磁盘容量与 IO、网络流量、TCP 连接、系统负载与运行时间**，并给出**进程 CPU / 内存 Top N 榜单**。所有数据直接读 `/proc` 与 `statfs(2)`，不调用 `top`/`free`/`df`/`iostat` 等外部命令，也不需要 root 权限。
 
 编译产物是纯静态 ELF（`CGO_ENABLED=0`），`scp` 上去就能跑，对 aarch64 / Anolis OS 这类环境没有 glibc 版本兼容问题。
 
@@ -25,7 +25,7 @@ docker-compose.yml                # 最小权限、宿主机视角的容器部�
 
 ## 编译
 
-源码仓库：<https://github.com/Zslocal/go_local_host>，版本标记 `v0.1.0`。module path 已与仓库一致，克隆后即可编译：
+源码仓库：<https://github.com/Zslocal/go_local_host>，当前版本 `v0.1.2`（含进程 CPU / 内存 Top N 榜单）。module path 已与仓库一致，克隆后即可编译：
 
 ```bash
 git clone https://github.com/Zslocal/go_local_host.git
@@ -42,12 +42,12 @@ bash build.sh                 # 产出 dist/hostmon-linux-amd64 与 dist/hostmon
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath \
-  -ldflags "-s -w -X main.version=0.1.0" -o hostmon ./cmd/hostmon
+  -ldflags "-s -w -X main.version=0.1.2" -o hostmon ./cmd/hostmon
 ```
 
 ```powershell
 $env:CGO_ENABLED="0"; $env:GOOS="linux"; $env:GOARCH="arm64"
-go build -trimpath -ldflags "-s -w -X main.version=0.1.0" -o hostmon ./cmd/hostmon
+go build -trimpath -ldflags "-s -w -X main.version=0.1.2" -o hostmon ./cmd/hostmon
 ```
 
 部署：
@@ -64,6 +64,7 @@ ssh user@server 'chmod +x /usr/local/bin/hostmon && hostmon -once'
 ```bash
 hostmon -once                                  # 采集一次，打印完整文本报告
 hostmon -interval 5s -cores -all-lines        # 持续刷新，显示每核与全部设备
+hostmon -proc-top 20 -once                     # 进程 CPU / 内存各看前 20
 hostmon -once -format json | jq .cpu          # 脚本 / 定时任务集成
 hostmon -format json -log /var/log/hostmon.jsonl -interval 10s   # JSONL 落盘，供日志采集器消费
 
@@ -93,6 +94,14 @@ DISK      r/s    w/s    READ/s   WRITE/s  IOPS  UTIL%  LAT(ms)
 NET       RX/s     TX/s     RXpkt/s  TXpkt/s  RX ERR/DROP (total)
   eth0     1.2M/s   800.0K/s 1200     900      0 / 0
 
+TOP CPU        CPU%    MEM%   RSS     THR  USER      STATE
+  1421 java    137.42  12.50  512.0M  86   app       R
+  998 dockerd  4.12    1.80   74.0M   24   root      S
+TOP MEM        CPU%    MEM%   RSS     THR  USER      STATE
+  1421 java    137.42  12.50  512.0M  86   app       R
+  2210 postgres 2.55   3.40   139.0M  9    postgres  S
+  （共扫描 468 个进程，100% CPU = 1 个逻辑核；明细可用 -format json 获取 cmdline）
+
 TCP       estab 128 | listen 24 | time_wait 42 | total 200
 ```
 
@@ -108,6 +117,7 @@ TCP       estab 128 | listen 24 | time_wait 42 | total 200
 | `-format` | `text` | `text` / `json` / `prom`；`json` 为单行紧凑格式，适合管道 |
 | `-pretty` | off | `-format json` 时缩进输出 |
 | `-cores` | off | 显示每个逻辑核的使用率 |
+| `-proc-top` | `10` | 进程榜单条数：CPU 榜与内存榜各取前 N（常用 `10` / `20`，`0` 关闭进程采集） |
 | `-all-lines` | off | 文本输出不限制挂载点/磁盘/网卡行数（默认 8/6/6） |
 | `-top` | off | 持续模式 ANSI 清屏重绘，类似 `top` |
 | `-net-all` | off | 把 `lo`/`veth*`/`cni*`/`br-*` 等虚拟网卡也纳入统计 |
@@ -161,7 +171,7 @@ server {
 
 鉴权边界：`/` 是纯静态 HTML、不含任何主机数据，所以放行；`/api/v1/*` 和 `/metrics` 严格校验令牌；`/healthz` 不做鉴权（供探针使用），不要把它暴露到公网。
 
-仪表盘响应式：顶部 4 张 KPI 卡片固定只有两种排布 —— 视口 ≥901px 为 **1×4**，≤900px 为 **2×2**，不会出现 3+1 的孤行；主内容在 1180px 以下改单栏，侧栏为「TCP/进程 + 主机信息」等高并排、「告警」横跨整宽，因此不会出现孤行空白；760px 以下全部单栏、表格可横向滚动并显示「横滑」提示，390px 手机宽度同样可用。信息表（`.kv`）标签列最小 84px、最多两行，长值自动换行，避免中文标签被挤成竖排。
+仪表盘响应式：顶部 4 张 KPI 卡片固定只有两种排布 —— 视口 ≥901px 为 **1×4**，≤900px 为 **2×2**，不会出现 3+1 的孤行；主内容在 1180px 以下改单栏，侧栏为「TCP/进程 + 主机信息」等高并排、「告警」横跨整宽，因此不会出现孤行空白；底部「进程 · CPU 榜 / 内存榜」两块等宽并排，≤900px 堆叠为整宽；760px 以下全部单栏、表格可横向滚动并显示「横滑」提示，390px 手机宽度同样可用。信息表（`.kv`）标签列最小 84px、最多两行，长值自动换行，避免中文标签被挤成竖排。
 
 ## Prometheus / Grafana
 
@@ -190,7 +200,10 @@ scrape_configs:
 | `hostmon_disk_{reads,writes,read_bytes,write_bytes}_total` | counter | device |
 | `hostmon_network_{receive,transmit}_bytes_per_second`, `..._packets_per_second` | gauge | interface |
 | `hostmon_network_{receive,transmit}_{bytes,errors,drops}_total` | counter | interface |
-| `hostmon_tcp_connections`, `hostmon_processes`, `hostmon_processes_created_total` | gauge/counter | state |
+| `hostmon_tcp_connections`, `hostmon_processes`, `hostmon_processes_scanned`, `hostmon_processes_created_total` | gauge/counter | state |
+| `hostmon_process_cpu_percent`, `hostmon_process_memory_bytes`, `hostmon_process_memory_percent`, `hostmon_process_threads` | gauge | pid/name/user |
+
+> 进程类指标只输出**榜单内的进程**（CPU 前 N ∪ 内存前 N，按 `pid` 去重），不是全量进程，避免高基数与序列抖动。需要全量明细时用 `-format json` 读 `processes.top_cpu` / `top_mem`。
 
 > `/metrics` 返回的是**最近一次采集的缓存值**，不会因 Prometheus 抓取而额外触发采样，抓取频率可以高于 `-interval`。
 
@@ -270,7 +283,7 @@ journalctl -u hostmon -f
 | `-v /:/host:ro,rslave` | 推荐 | 让 `statfs(2)` 能访问宿主机根分区；同时读 `/host/etc/os-release`、`/host/etc/hostname`。`rslave` 让宿主机后续挂载/卸载事件传播进容器。只读暴露整个根，配合下面的最小权限使用 |
 | `--network=host` | 推荐 | 让 `/host/proc/net/*` 解析到宿主机 netns；不加则只能看到容器网卡。与 `ports` 互斥 |
 | `-v /usr/share/zoneinfo:/usr/share/zoneinfo:ro` + `TZ` | 可选 | `scratch` 镜像不带 tzdata，挂上后时间显示与宿主机一致 |
-| `--pid=host` | ❌ 不需要 | 不读 `/proc/<pid>/`，共享 PID namespace 无收益 |
+| `--pid=host` | ❌ 不需要 | 进程榜单读的是 `-proc-root` 下的 `/proc/<pid>/stat`（即宿主 `/proc` 的只读挂载），容器自身 PID namespace 不影响它 |
 | `/sys` | ❌ 不需要 | 磁盘 IO 走 `/proc/diskstats`，不读 sysfs |
 | `--privileged` / `--cap-add` / root | ❌ 不需要 | 只是读文件 + `statfs(2)`，`--cap-drop=ALL` 就能跑 |
 
@@ -362,6 +375,8 @@ compose 用 `network_mode: host`，所以 `-web 127.0.0.1:9100` 就是宿主机�
 | `mounts` 为空，或数值全是容器 overlay | 少了 `-v /:/host:ro,rslave` 或 `-host-root /host`；也可能是 SELinux 拦截 |
 | 数据盘容量显示成根分区的值 | 该挂载点没传播进容器，见「磁盘容量的边界」；单独挂到同名路径，或改用 systemd |
 | 网络只有 `eth0`、TCP 连接数偏小 | 少了 `--network=host` |
+| 进程榜单为空、`processes.scanned` 为 0 | 没挂 `-v /proc:/host/proc:ro`，或 `-proc-root` 指错；`-proc-top 0` 时榜单本身就是空（属预期） |
+| 进程的用户名显示成数字 | 容器内读不到 `/etc/passwd`；挂 `-v /etc/passwd:/host/etc/passwd:ro` 并设 `-host-root /host`，或忽略该列 |
 | 主机名显示容器 ID、OS 显示 `linux` 或镜像发行版 | 少了根挂载 `/:/host:ro,rslave`（程序从 `/host/etc/hostname`、`/host/etc/os-release` 读）；或加 `--uts=host` + 单独挂 `/etc/os-release` |
 | 日志时间与北京时间差 8 小时 | scratch 无 tzdata，挂 `/usr/share/zoneinfo` 并设 `TZ` |
 | `-log` 报 `read-only file system` / `permission denied` | `--read-only` 下需 `tmpfs` 或可写卷，且目录允许 uid 65532 写（compose 里已给注释模板） |
@@ -380,6 +395,7 @@ compose 用 `network_mode: host`，所以 `-web 127.0.0.1:9100` 就是宿主机�
 | 磁盘 IOPS/吞吐/busy/延迟 | `/proc/diskstats` | 差分；sector 固定 512B；`util = Δio_time / Δt`；只取前 14 列，兼容 4.18+ 新增的 discard/flush 列 |
 | 网卡速率/错包/丢包 | `/proc/net/dev` | 差分；默认排除 `lo`/`veth*`/`cni*` 等虚拟接口 |
 | TCP 连接状态 | `/proc/net/tcp`, `/proc/net/tcp6` | 按状态字段聚合 |
+| 进程 Top N（CPU / 内存） | `/proc/<pid>/stat`、`/etc/passwd`、`/proc/<pid>/cmdline` | `cpu% = Δ(utime+stime) / 100 / Δt × 100`（100% = 1 核，可超 100%）；`rss = rss_pages × 页大小`；`mem% = rss / MemTotal`；用 `starttime` 识别 PID 复用；`cmdline` 只对入选榜单的进程读取 |
 | 主机信息 | `uname`、`/proc/cpuinfo`、`/proc/sys/kernel/osrelease`、`/etc/os-release` | ARM 无 `model name` 时回退 `Hardware`/`Processor` |
 
 **为什么所有速率都基于两次采样**：`/proc/stat`、`/proc/net/dev`、`/proc/diskstats` 都是开机以来的累计计数器，单次读取只能得到总量，除以 uptime 是"历史平均值"而不是实时值。`Sampler` 用 `cur.At - prev.At` 作为真实时间窗口，因此改变 `-interval` 不影响结果正确性；计数器回绕/设备重置时做了防下溢保护。
@@ -396,6 +412,34 @@ compose 用 `network_mode: host`，所以 `-web 127.0.0.1:9100` 就是宿主机�
 
 ```bash
 go vet ./...
-go test ./...                 # 解析/差分/路径映射/告警状态机/Prometheus 格式/HTTP 端点共 21 组测试
+go test ./...                 # 解析/差分/路径映射/告警状态机/Prometheus 格式/HTTP 端点共 24 组测试
 bash build.sh                 # 交叉编译并输出 SHA256
 ```
+
+## 版本变更
+
+### v0.1.2（2026-11-06）
+
+新增**进程 Top N 榜单**：同时给出「CPU 占用最高」与「常驻内存最高」两个列表。
+
+| 项 | 说明 |
+|---|---|
+| 参数 | `-proc-top N`，默认 `10`，常用 `10` / `20`，`0` 关闭（关闭后不再读 `/proc/<pid>`，JSON 里榜单为空） |
+| 采集 | 只读 `/proc/<pid>/stat` 一个文件；用户名来自 `/etc/passwd`（每轮读一次并缓存成 uid→name），`cmdline` 只对入选榜单的进程补读 |
+| CPU 口径 | `Δ(utime+stime) / USER_HZ(100) / Δt × 100`，**100% = 1 个逻辑核**，多线程进程可超 100%（与 `top` 一致） |
+| 内存口径 | `rss_pages × 页大小`（不包含 swap）；`内存% = RSS / MemTotal` |
+| PID 复用 | 用 `stat` 的 `starttime` 判别，进程重启后不会把两次累计 CPU 时间当成一次差分，杜绝几百 % 的假峰值 |
+| 输出 | 文本两张表（`TOP CPU` / `TOP MEM`）；JSON 新增 `processes.top_cpu`、`top_mem`、`scanned`；Prometheus 新增 `hostmon_process_cpu_percent`、`hostmon_process_memory_bytes`、`hostmon_process_memory_percent`、`hostmon_process_threads`；仪表盘底部新增两块榜单面板 |
+| 每行字段 | PID、进程名、所属用户、状态、CPU%、内存%、常驻内存、线程数（JSON / 仪表盘 tooltip 另含 `cmdline`） |
+| 开销 | 每个进程一次 `lstat` + 一次小文件读，几百个进程通常毫秒级；不读 `/proc/<pid>/status`、`/proc/<pid>/io` |
+| 测试 | 21 → **24 组**：括号内含空格/右括号的 `comm`、负数 `rss`、PID 复用归零、榜单排序与截断、Prometheus 同 pid 去重、页面面板存在性 |
+
+```bash
+hostmon -proc-top 20 -once            # 文本：两个榜单各 20 条
+hostmon -format json -once | jq '.processes.top_cpu[:3]'
+curl -H 'Authorization: Bearer <token>' http://127.0.0.1:9100/metrics | grep hostmon_process_
+```
+
+### v0.1.1 / v0.1.0
+
+首个公开版本：CPU、内存、Swap、磁盘容量与 IO、网络、TCP、负载与运行时间；text / JSON / Prometheus 三种输出；内嵌仪表盘、阈值告警、Docker 与 systemd 部署。`v0.1.1` 与 `v0.1.0` 代码完全相同，仅用于绕开 Go 校验和数据库对 `v0.1.0` 的锁定。

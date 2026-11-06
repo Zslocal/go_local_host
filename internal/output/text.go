@@ -111,6 +111,24 @@ func Text(w io.Writer, s *monitor.Snapshot, opt TextOptions) error {
 		fmt.Fprint(tw, "\n")
 	}
 
+	// 进程榜单：CPU 与内存各一屏，100% = 1 个逻辑核（与 top 口径一致）
+	p := s.Processes
+	if len(p.TopCPU) > 0 || len(p.TopMem) > 0 {
+		fmt.Fprintf(tw, "TOP CPU\tCPU%%\tMEM%%\tRSS\tTHR\tUSER\tSTATE\n")
+		for _, x := range p.TopCPU {
+			fmt.Fprintf(tw, "  %d %s\t%.2f\t%.2f\t%s\t%d\t%s\t%s\n",
+				x.PID, clipName(x.Name), x.CPU, x.Mem, humanBytes(x.RSS), x.Threads,
+				empty(x.User, "-"), empty(x.State, "-"))
+		}
+		fmt.Fprintf(tw, "TOP MEM\tCPU%%\tMEM%%\tRSS\tTHR\tUSER\tSTATE\n")
+		for _, x := range p.TopMem {
+			fmt.Fprintf(tw, "  %d %s\t%.2f\t%.2f\t%s\t%d\t%s\t%s\n",
+				x.PID, clipName(x.Name), x.CPU, x.Mem, humanBytes(x.RSS), x.Threads,
+				empty(x.User, "-"), empty(x.State, "-"))
+		}
+		fmt.Fprintf(tw, "  （共扫描 %d 个进程，100%% CPU = 1 个逻辑核；明细可用 -format json 获取 cmdline）\n\n", p.Scanned)
+	}
+
 	fmt.Fprintf(tw, "TCP\t estab %d | listen %d | time_wait %d | syn_sent %d | syn_recv %d | close_wait %d | total %d\n",
 		s.TCP.Established, s.TCP.Listen, s.TCP.TimeWait, s.TCP.SynSent,
 		s.TCP.SynRecv, s.TCP.CloseWait, s.TCP.Total)
@@ -124,6 +142,15 @@ func isIgnoredDisk(name string) bool {
 		}
 	}
 	return false
+}
+
+// clipName 把进程名限制在 20 个字符内，避免个别长 comm 撑乱表格对齐。
+func clipName(name string) string {
+	r := []rune(empty(name, "?"))
+	if len(r) > 20 {
+		return string(r[:19]) + "…"
+	}
+	return string(r)
 }
 
 func empty(s, fallback string) string {

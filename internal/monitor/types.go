@@ -136,9 +136,27 @@ type TCPInfo struct {
 }
 
 type ProcessInfo struct {
-	Running int    `json:"running"`
-	Total   int    `json:"total"`
-	Created uint64 `json:"created_total"` // /proc/stat processes，累计 fork 数
+	Running int        `json:"running"`
+	Total   int        `json:"total"`
+	Created uint64     `json:"created_total"` // /proc/stat processes，累计 fork 数
+	Scanned int        `json:"scanned"`       // 本轮成功读到 /proc/<pid>/stat 的进程数
+	TopCPU  []ProcInfo `json:"top_cpu"`       // 按 CPU 使用率降序的前 N 个进程
+	TopMem  []ProcInfo `json:"top_mem"`       // 按常驻内存降序的前 N 个进程
+}
+
+// ProcInfo 是单个进程的采样结果。CPU 与内存都取「当前时刻」的口径：
+//   - CPU：相邻两次采样间消耗的 CPU 时间 / 真实时间窗口，100% = 1 个逻辑核（与 top 一致）；
+//   - RSS：/proc/<pid>/stat 的 resident set size，不包含被换出的部分。
+type ProcInfo struct {
+	PID     int     `json:"pid"`
+	Name    string  `json:"name"`
+	User    string  `json:"user"`  // 由 /etc/passwd 解析；解析不到时回退为数字 UID
+	State   string  `json:"state"` // R/S/D/Z/T 等单字母状态
+	CPU     float64 `json:"cpu_percent"`
+	Mem     float64 `json:"mem_percent"` // RSS / MemTotal
+	RSS     uint64  `json:"rss_bytes"`
+	Threads int     `json:"threads"`
+	Cmdline string  `json:"cmdline,omitempty"` // 仅对入选榜单的进程读取，截断到 120 字符
 }
 
 // 以下是原始计数器（未经差分），仅在包内使用。
@@ -184,4 +202,17 @@ type rawSnapshot struct {
 	Network   map[string]netRaw
 	TCP       TCPInfo
 	Processes ProcessInfo
+	Procs     map[int]procRaw // pid -> 原始计数器，用于下一轮差分
+}
+
+// procRaw 是单个进程的原始计数器（/proc/<pid>/stat），单位均为内核 tick / page。
+type procRaw struct {
+	PID        int
+	Name       string
+	User       string // 由 /etc/passwd 解析出的用户名，解析不到时是数字 UID
+	State      string
+	Threads    int
+	StartTicks uint64 // 进程启动时刻（开机后的 tick 数），用于识别 PID 复用
+	CPUTicks   uint64 // utime + stime
+	RSSPages   int64
 }

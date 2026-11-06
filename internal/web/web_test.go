@@ -36,6 +36,10 @@ func TestEndpointsWithoutToken(t *testing.T) {
 		contains string
 	}{
 		{"/", 200, "hostmon"},
+		// 仪表盘必须包含进程榜单的两块面板与渲染入口，防止改 HTML 时漏掉。
+		{"/", 200, "进程 · CPU 榜"},
+		{"/", 200, "进程 · 内存榜"},
+		{"/", 200, "proccpu"},
 		{"/api/v1/metrics", 200, `"hostname":"node-01"`},
 		{"/api/v1/alerts", 200, "cpu high"},
 		{"/metrics", 200, "hostmon_up 1"},

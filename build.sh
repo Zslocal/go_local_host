@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # 默认版本号与 git tag 保持一致；发布新版本时可 VERSION=v0.2.0 bash build.sh
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.1.2}"
 OUT="dist"
 mkdir -p "$OUT"
 

@@ -326,6 +326,75 @@ func parseCPUModel(r io.Reader) string {
 	return "unknown"
 }
 
+// parseProcStat 解析 /proc/<pid>/stat。
+//
+// 字段布局（1 起）：
+//
+//	pid (comm) state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt
+//	utime stime cutime cstime priority nice threads itreal starttime vsize rss ...
+//
+// comm 用括号包裹且**允许包含空格和右括号**（典型如 "(tmux: server)"），
+// 因此不能按空白切分，必须先定位最后一个 ')'，再对剩余部分做字段划分。
+func parseProcStat(line string) (procRaw, error) {
+	var p procRaw
+	open := strings.IndexByte(line, '(')
+	closeIdx := strings.LastIndexByte(line, ')')
+	if open < 0 || closeIdx < open {
+		return p, errors.New("proc stat: malformed comm")
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(line[:open]))
+	if err != nil {
+		return p, fmt.Errorf("proc stat: bad pid: %w", err)
+	}
+	p.PID = pid
+	p.Name = line[open+1 : closeIdx]
+
+	// rest[0] 是 state（字段 3），因此字段 n 对应 rest[n-3]。
+	rest := strings.Fields(line[closeIdx+1:])
+	if len(rest) < 22 {
+		return p, errors.New("proc stat: too few fields")
+	}
+	p.State = rest[0]
+	u := func(i int) uint64 {
+		v, _ := strconv.ParseUint(rest[i], 10, 64)
+		return v
+	}
+	p.CPUTicks = u(11) + u(12) // utime + stime
+	p.Threads, _ = strconv.Atoi(rest[17])
+	p.StartTicks = u(19)
+	// rss 是带符号的 long，极少数情况（僵尸进程）会是 0 或负数。
+	rss, _ := strconv.ParseInt(rest[21], 10, 64)
+	if rss < 0 {
+		rss = 0
+	}
+	p.RSSPages = rss
+	return p, nil
+}
+
+// parsePasswd 解析 /etc/passwd，返回 uid -> 用户名。
+func parsePasswd(r io.Reader) map[int]string {
+	out := make(map[int]string)
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Split(line, ":")
+		if len(f) < 3 {
+			continue
+		}
+		uid, err := strconv.Atoi(f[2])
+		if err != nil {
+			continue
+		}
+		if _, dup := out[uid]; !dup {
+			out[uid] = f[0]
+		}
+	}
+	return out
+}
+
 func humanDuration(sec float64) string {
 	if sec < 0 {
 		sec = 0

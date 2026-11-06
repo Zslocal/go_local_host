@@ -3,6 +3,8 @@ package output
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Zslocal/go_local_host/internal/monitor"
@@ -114,7 +116,31 @@ func Prometheus(w io.Writer, s *monitor.Snapshot) error {
 	gauge("hostmon_tcp_connections", "TCP connections by state.", s.TCP.Other, "state", "other")
 	gauge("hostmon_processes", "Process count.", s.Processes.Total, "state", "total")
 	gauge("hostmon_processes", "Process count.", s.Processes.Running, "state", "running")
+	gauge("hostmon_processes_scanned", "Processes whose /proc stat file was readable this round.", s.Processes.Scanned)
 	counter("hostmon_processes_created_total", "Cumulative forks since boot.", s.Processes.Created)
+
+	// 进程榜单：两个榜单会重叠，必须先按 pid 去重，
+	// 否则同一组标签会重复出现，严格的解析器会直接报错。
+	top := make(map[int]monitor.ProcInfo, len(s.Processes.TopCPU)+len(s.Processes.TopMem))
+	for _, p := range s.Processes.TopCPU {
+		top[p.PID] = p
+	}
+	for _, p := range s.Processes.TopMem {
+		top[p.PID] = p
+	}
+	pids := make([]int, 0, len(top))
+	for pid := range top {
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	for _, pid := range pids {
+		p := top[pid]
+		l := []string{"pid", strconv.Itoa(p.PID), "name", p.Name, "user", p.User}
+		gauge("hostmon_process_cpu_percent", "CPU usage percent of a top-N process (100 = one logical core).", p.CPU, l...)
+		gauge("hostmon_process_memory_bytes", "Resident memory of a top-N process in bytes.", p.RSS, l...)
+		gauge("hostmon_process_memory_percent", "Resident memory of a top-N process as percent of MemTotal.", p.Mem, l...)
+		gauge("hostmon_process_threads", "Thread count of a top-N process.", p.Threads, l...)
+	}
 
 	_, err := io.WriteString(w, b.String())
 	return err

@@ -7,7 +7,9 @@ package monitor
 import (
 	"fmt"
 	"os"
+	"path"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +30,7 @@ const (
 	procOsRelease = "sys/kernel/osrelease"
 	etcOsRelease  = "os-release"
 	etcHostname   = "hostname"
+	etcPasswd     = "passwd"
 )
 
 // 只统计真实的、带容量语义的文件系统，排除 procfs/sysfs/cgroup/tmpfs 等伪文件系统。
@@ -139,11 +142,85 @@ func collectRaw(cfg Config) (*rawSnapshot, error) {
 		}
 	}
 
+	// --- 进程明细（CPU 时间 / 常驻内存，供 Top N 榜单使用） ---
+	collectProcesses(hp, s)
+
 	s.Host = collectHost(hp)
 	if s.Host.CPUs > 0 && s.Load.Load1 >= 0 {
 		s.Load.PerCore1 = s.Load.Load1 / float64(s.Host.CPUs)
 	}
 	return s, nil
+}
+
+// collectProcesses 遍历 /proc/<pid>/stat，收集每个进程的 CPU 时间与常驻内存。
+// 单个进程读失败属正常（进程刚退出），直接跳过；整个 /proc 读不到时返回空表。
+// 用户名由 /etc/passwd 一次性解析成 uid -> name 映射，避免每个进程都查一遍。
+func collectProcesses(hp hostPaths, into *rawSnapshot) {
+	users := map[int]string{}
+	if f, err := readProc(hp.etc(etcPasswd)); err == nil {
+		users = parsePasswd(f)
+		f.Close()
+	}
+
+	dir := hp.proc("")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	procs := make(map[int]procRaw, len(ents))
+	for _, e := range ents {
+		name := e.Name()
+		// /proc 下只有纯数字目录是进程；跳过 self、net、sys 等。
+		if name == "" || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		pid, err := strconv.Atoi(name)
+		if err != nil {
+			continue
+		}
+		b, err := os.ReadFile(path.Join(dir, name, "stat"))
+		if err != nil {
+			continue
+		}
+		p, err := parseProcStat(string(b))
+		if err != nil || p.PID != pid {
+			continue
+		}
+		// 进程属主取 /proc/<pid> 目录的 uid（内核保证与真实进程一致）。
+		if info, err := e.Info(); err == nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				uid := int(st.Uid)
+				if u, ok := users[uid]; ok {
+					p.User = u
+				} else {
+					p.User = strconv.Itoa(uid)
+				}
+			}
+		}
+		procs[pid] = p
+	}
+	into.Procs = procs
+}
+
+// enrichProcDetails 只对已入选榜单的进程补读 /proc/<pid>/cmdline，
+// 避免为了一个展示字段把全部进程都多读一遍。
+func enrichProcDetails(s *Snapshot, hp hostPaths) {
+	if s == nil {
+		return
+	}
+	for _, list := range [][]ProcInfo{s.Processes.TopCPU, s.Processes.TopMem} {
+		for i := range list {
+			b, err := os.ReadFile(hp.proc(strconv.Itoa(list[i].PID) + "/cmdline"))
+			if err != nil || len(b) == 0 {
+				continue
+			}
+			cmd := strings.TrimSpace(strings.ReplaceAll(string(b), "\x00", " "))
+			if r := []rune(cmd); len(r) > 120 {
+				cmd = string(r[:120]) + "…"
+			}
+			list[i].Cmdline = cmd
+		}
+	}
 }
 
 func collectHost(hp hostPaths) HostInfo {

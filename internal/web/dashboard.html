@@ -166,6 +166,9 @@ tbody tr:last-child td{border-bottom:none}
 .alerts .t{color:var(--faint); margin-right:8px; font-variant-numeric:tabular-nums}
 .alerts .w{color:var(--danger); font-weight:600} .alerts .o{color:var(--ok); font-weight:600}
 
+/* 进程榜单：两块等宽面板，窄屏自动堆叠 */
+.proc-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:16px}
+
 footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
 
 /* ---------- 响应式 ---------- */
@@ -184,6 +187,7 @@ footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
 /* 4 列放不下时直接降为 2×2，绝不停留在 3 列 */
 @media (max-width:900px){
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .proc-grid{grid-template-columns:1fr}
 }
 @media (max-width:760px){
   .wrap{max-width:100%; padding:16px 14px 32px}
@@ -270,6 +274,17 @@ footer{color:var(--faint); font-size:11.5px; margin-top:22px; text-align:center}
         <ul class="alerts" id="alerts"></ul>
       </section>
     </div>
+  </div>
+
+  <div class="proc-grid">
+    <section>
+      <div class="sec-head"><h2>进程 · CPU 榜</h2><span class="sec-meta has-tbl"><span id="proccpu-meta">—</span><span class="scroll-hint"> · 横滑</span></span></div>
+      <div id="proccpu" class="empty">加载中…</div>
+    </section>
+    <section>
+      <div class="sec-head"><h2>进程 · 内存榜</h2><span class="sec-meta has-tbl"><span id="procmem-meta">—</span><span class="scroll-hint"> · 横滑</span></span></div>
+      <div id="procmem" class="empty">加载中…</div>
+    </section>
   </div>
   <footer>纯 /proc 采集 · 零依赖 · <span id="stamp">—</span></footer>
 </div>
@@ -377,6 +392,22 @@ function render(s){
     ['CPU 型号',h.cpu_model||'-'], ['启动时间',s.uptime?.boot_time?new Date(s.uptime.boot_time).toLocaleString('zh-CN'):'-'],
     ['采样窗口',n(s.interval_sec)+'s'], ['数据时间',new Date(s.timestamp).toLocaleTimeString('zh-CN')]
   ]);
+
+  // 进程榜单：CPU 口径与 top 一致（100% = 1 核），可超过 100%
+  const topCPU=p.top_cpu||[], topMem=p.top_mem||[];
+  $('proccpu-meta').textContent=`前 ${topCPU.length} / 扫描 ${p.scanned||0} 个`;
+  $('procmem-meta').textContent=`前 ${topMem.length} / 扫描 ${p.scanned||0} 个`;
+  const procRows = list => list.map(x=>`<tr>
+      <td class="num">${x.pid}</td>
+      <td><span class="mono ellip" title="${esc(x.cmdline||x.name)}">${esc(x.name)}</span></td>
+      <td class="num">${n(x.cpu_percent)}%</td>
+      <td>${pill(x.mem_percent)}</td>
+      <td class="num">${hb(x.rss_bytes)}</td>
+      <td class="num">${x.threads||0}</td>
+      <td>${esc(x.user||'-')}</td></tr>`);
+  const procHead=['PID','进程','CPU%','内存%','常驻内存','线程','用户'];
+  $('proccpu').innerHTML = table(procHead, procRows(topCPU), '暂无进程数据（启动时用 -proc-top 0 会关闭采集）');
+  $('procmem').innerHTML = table(procHead, procRows(topMem), '暂无进程数据（启动时用 -proc-top 0 会关闭采集）');
 }
 
 function renderAlerts(evs){
@@ -410,7 +441,20 @@ const DEMO={
   ],
   network:[{interface:'ens32',rx_bytes_per_sec:1.2*2**20,tx_bytes_per_sec:5.7*2**20,rx_packets_per_sec:8,tx_packets_per_sec:8,rx_errors_total:0,rx_dropped_total:0}],
   tcp:{established:3,listen:17,time_wait:0,syn_sent:0,syn_recv:0,close_wait:0,total:20},
-  processes:{total:468,running:1,created_total:19496}
+  processes:{total:468,running:1,created_total:19496,scanned:468,
+    top_cpu:[
+      {pid:1421,name:'java',user:'app',state:'R',cpu_percent:37.42,mem_percent:12.5,rss_bytes:512*2**20,threads:86,cmdline:'java -Xms512m -jar app.jar'},
+      {pid:998,name:'dockerd',user:'root',state:'S',cpu_percent:4.12,mem_percent:1.8,rss_bytes:74*2**20,threads:24},
+      {pid:2210,name:'postgres',user:'postgres',state:'S',cpu_percent:2.55,mem_percent:3.4,rss_bytes:139*2**20,threads:9},
+      {pid:877,name:'node_exporter',user:'prometheus',state:'S',cpu_percent:0.85,mem_percent:0.3,rss_bytes:12*2**20,threads:7}
+    ],
+    top_mem:[
+      {pid:1421,name:'java',user:'app',state:'R',cpu_percent:37.42,mem_percent:12.5,rss_bytes:512*2**20,threads:86,cmdline:'java -Xms512m -jar app.jar'},
+      {pid:2210,name:'postgres',user:'postgres',state:'S',cpu_percent:2.55,mem_percent:3.4,rss_bytes:139*2**20,threads:9},
+      {pid:998,name:'dockerd',user:'root',state:'S',cpu_percent:4.12,mem_percent:1.8,rss_bytes:74*2**20,threads:24},
+      {pid:3011,name:'minio',user:'root',state:'S',cpu_percent:0.42,mem_percent:1.5,rss_bytes:61*2**20,threads:18}
+    ]
+  }
 };
 const DEMO_ALERTS=[
   {time:'2026-11-05T15:31:02+08:00',level:'OK',message:'CPU usage recovered: 12.10% (threshold 85.00%)'},
@@ -426,7 +470,7 @@ function showLogin(){
   $('login').classList.add('on');
   $('dot').classList.add('off');$('status').textContent='需要令牌';
   $('hostline').textContent='数据接口受保护，请输入启动时的 -web-token 后点「连接」';
-  for(const id of ['mounts','disks','nets','misc','hostinfo']){
+  for(const id of ['mounts','disks','nets','misc','hostinfo','proccpu','procmem']){
     $(id).innerHTML='<div class="login-tip">输入访问令牌后显示实时数据</div>';
   }
 }

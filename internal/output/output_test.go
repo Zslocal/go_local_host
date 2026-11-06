@@ -38,12 +38,23 @@ func sampleSnapshot() *monitor.Snapshot {
 			Usage: 42.5, User: 30, System: 10, IOWait: 2.5,
 			Cores: []monitor.CoreInfo{{ID: "0", Usage: 50}, {ID: "1", Usage: 35}},
 		},
-		Memory:    monitor.MemoryInfo{Total: 16 << 30, Used: 8 << 30, Usage: 50},
-		Mounts:    []monitor.MountInfo{{Device: "/dev/sda1", MountPoint: "/", FSType: "ext4", Total: 100 << 30, Used: 60 << 30, Usage: 60}},
-		DiskIO:    []monitor.DiskIOInfo{{Device: "sda", ReadRate: 1024, WriteRate: 2048, ReadTotal: 10}},
-		Network:   []monitor.NetInfo{{Interface: "eth0", RxRate: 1000, TxRate: 2000, RxBytes: 5000}},
-		TCP:       monitor.TCPInfo{Established: 12, Listen: 3, Total: 20},
-		Processes: monitor.ProcessInfo{Running: 2, Total: 300, Created: 9999},
+		Memory:  monitor.MemoryInfo{Total: 16 << 30, Used: 8 << 30, Usage: 50},
+		Mounts:  []monitor.MountInfo{{Device: "/dev/sda1", MountPoint: "/", FSType: "ext4", Total: 100 << 30, Used: 60 << 30, Usage: 60}},
+		DiskIO:  []monitor.DiskIOInfo{{Device: "sda", ReadRate: 1024, WriteRate: 2048, ReadTotal: 10}},
+		Network: []monitor.NetInfo{{Interface: "eth0", RxRate: 1000, TxRate: 2000, RxBytes: 5000}},
+		TCP:     monitor.TCPInfo{Established: 12, Listen: 3, Total: 20},
+		Processes: monitor.ProcessInfo{
+			Running: 2, Total: 300, Created: 9999, Scanned: 287,
+			TopCPU: []monitor.ProcInfo{
+				{PID: 4242, Name: "java", User: "app", State: "R", CPU: 187.5, Mem: 12.5, RSS: 2 << 30, Threads: 168},
+				{PID: 7, Name: "nginx", User: "www-data", State: "S", CPU: 3.25, Mem: 0.4, RSS: 64 << 20, Threads: 4},
+			},
+			// 故意与 TopCPU 有重叠（PID 4242），用于验证 Prometheus 输出按 pid 去重。
+			TopMem: []monitor.ProcInfo{
+				{PID: 4242, Name: "java", User: "app", State: "R", CPU: 187.5, Mem: 12.5, RSS: 2 << 30, Threads: 168},
+				{PID: 91, Name: "postgres", User: "postgres", State: "S", CPU: 1.5, Mem: 6.25, RSS: 1 << 30, Threads: 12},
+			},
+		},
 	}
 }
 
@@ -72,11 +83,18 @@ func TestPrometheusFormat(t *testing.T) {
 		`# TYPE hostmon_disk_reads_total counter`,
 		`hostmon_network_receive_bytes_total{interface="eth0"} 5000`,
 		`hostmon_tcp_connections{state="established"} 12`,
+		`hostmon_processes_scanned 287`,
+		`hostmon_process_cpu_percent{pid="4242",name="java",user="app"} 187.5`,
+		`hostmon_process_memory_bytes{pid="91",name="postgres",user="postgres"} 1073741824`,
 		"hostmon_up 1\n",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q", want)
 		}
+	}
+	// 两个榜单重叠的进程必须只出现一次，否则同样标签重复、解析器报错。
+	if n := strings.Count(s, `hostmon_process_cpu_percent{pid="4242"`); n != 1 {
+		t.Fatalf("pid 4242 emitted %d times, want 1", n)
 	}
 }
 
@@ -86,7 +104,7 @@ func TestTextAndJSON(t *testing.T) {
 	if err := Text(&b, s, DefaultTextOptions()); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"node-01", "CPU", "Memory", "/", "sda", "eth0", "TCP"} {
+	for _, want := range []string{"node-01", "CPU", "Memory", "/", "sda", "eth0", "TCP", "TOP CPU", "TOP MEM", "java", "postgres", "共扫描 287 个进程"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("text output missing %q", want)
 		}

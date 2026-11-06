@@ -22,7 +22,7 @@ import (
 	"github.com/Zslocal/go_local_host/internal/web"
 )
 
-var version = "dev" // 可用 -ldflags "-X main.version=0.1.0" 注入
+var version = "dev" // 可用 -ldflags "-X main.version=0.1.2" 注入
 
 type options struct {
 	interval  time.Duration
@@ -36,6 +36,7 @@ type options struct {
 	netAll    bool
 	allLines  bool
 	showCores bool
+	procTop   int
 	top       bool
 	quiet     bool
 	noAlert   bool
@@ -68,6 +69,7 @@ func parseFlags() options {
 	flag.BoolVar(&o.netAll, "net-all", false, "统计 lo / veth / cni 等虚拟网卡（默认排除）")
 	flag.BoolVar(&o.allLines, "all-lines", false, "文本输出不限制挂载点/磁盘/网卡行数")
 	flag.BoolVar(&o.showCores, "cores", false, "显示每个 CPU 核心的使用率")
+	flag.IntVar(&o.procTop, "proc-top", 10, "进程榜单条数：CPU / 内存各展示前 N 个（0 关闭，常用 10 或 20）")
 	flag.BoolVar(&o.top, "top", false, "持续模式清屏重绘（类似 top）")
 	flag.BoolVar(&o.quiet, "quiet", false, "启用 -web 时不在终端打印快照")
 	flag.BoolVar(&o.noAlert, "no-alert", false, "关闭阈值告警")
@@ -81,7 +83,7 @@ func parseFlags() options {
 	ver := flag.Bool("version", false, "显示版本并退出")
 
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `hostmon %s — Linux 服务器监控（CPU / 内存 / 磁盘 / 网络 / 运行时间）
+		fmt.Fprintf(flag.CommandLine.Output(), `hostmon %s — Linux 服务器监控（CPU / 内存 / 磁盘 / 网络 / 进程 / 运行时间）
 
 用法:
   hostmon [参数]
@@ -89,6 +91,7 @@ func parseFlags() options {
 常用示例:
   hostmon -once                              采集一次，打印文本报告
   hostmon -interval 5s -cores               每 5 秒刷新，显示每核使用率
+  hostmon -proc-top 20 -once                进程 CPU / 内存各看前 20
   hostmon -web 127.0.0.1:9100 -web-token xxx  启动仪表盘 + Prometheus 端点
   hostmon -once -format json | jq .         脚本集成
   hostmon -log /var/log/hostmon.jsonl -web :9100 -quiet  后台常驻
@@ -129,7 +132,7 @@ func main() {
 	defer stop()
 
 	sampler := monitor.NewSampler(monitor.Config{
-		Warmup: o.warmup, NetAll: o.netAll,
+		Warmup: o.warmup, NetAll: o.netAll, TopN: o.procTop,
 		ProcRoot: o.procRoot, HostRoot: o.hostRoot,
 	})
 	evaluator := alert.NewEvaluator(o.th)

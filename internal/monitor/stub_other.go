@@ -11,3 +11,6 @@ var ErrUnsupported = errors.New("hostmon: metrics collection requires Linux (/pr
 func collectRaw(Config) (*rawSnapshot, error) {
 	return nil, ErrUnsupported
 }
+
+// enrichProcDetails 在非 Linux 平台无事可做（没有 /proc/<pid>/cmdline）。
+func enrichProcDetails(*Snapshot, hostPaths) {}

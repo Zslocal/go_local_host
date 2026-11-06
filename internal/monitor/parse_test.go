@@ -181,7 +181,96 @@ func TestBuildSnapshotWindow(t *testing.T) {
 	t0 := time.Now()
 	prev := &rawSnapshot{At: t0, CPU: cpuRaw{Cores: map[string]cpuCounter{}}, DiskIO: map[string]diskRaw{}, Network: map[string]netRaw{}}
 	cur := &rawSnapshot{At: t0.Add(2 * time.Second), CPU: cpuRaw{Cores: map[string]cpuCounter{}}, DiskIO: map[string]diskRaw{}, Network: map[string]netRaw{}}
-	if s := buildSnapshot(prev, cur); s.Interval != 2 {
+	if s := buildSnapshot(prev, cur, 0); s.Interval != 2 {
 		t.Fatalf("interval = %v, want 2", s.Interval)
+	}
+}
+
+func TestParseProcStat(t *testing.T) {
+	// 第 2 个字段 comm 里带空格与右括号，必须用「最后一个 ')'」定位。
+	line := `4242 (tmux: server) S 1 4242 4242 0 -1 4194560 1234 0 0 0 150 250 0 0 20 0 7 0 987654 12345678 512 18446744073709551615`
+	p, err := parseProcStat(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PID != 4242 || p.Name != "tmux: server" || p.State != "S" {
+		t.Fatalf("identity = %+v", p)
+	}
+	if p.CPUTicks != 400 { // utime 150 + stime 250
+		t.Fatalf("cputicks = %d, want 400", p.CPUTicks)
+	}
+	if p.Threads != 7 || p.StartTicks != 987654 || p.RSSPages != 512 {
+		t.Fatalf("fields = %+v", p)
+	}
+
+	if _, err := parseProcStat("garbage"); err == nil {
+		t.Fatal("want error for malformed line")
+	}
+	if _, err := parseProcStat(`1 (init) S 0`); err == nil {
+		t.Fatal("want error for truncated line")
+	}
+	// 僵尸进程的 rss 可能是负数，钳到 0。
+	if p, err := parseProcStat(`9 (zombie) Z 1 9 9 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1 0 -5`); err != nil || p.RSSPages != 0 {
+		t.Fatalf("zombie = %+v, err=%v", p, err)
+	}
+}
+
+func TestParsePasswd(t *testing.T) {
+	users := parsePasswd(strings.NewReader("# comment\nroot:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33::/var/www:/usr/sbin/nologin\nbad line\n"))
+	if users[0] != "root" || users[33] != "www-data" || len(users) != 2 {
+		t.Fatalf("users = %+v", users)
+	}
+}
+
+func TestBuildProcTop(t *testing.T) {
+	t0 := time.Now()
+	mk := func(at time.Time, procs map[int]procRaw) *rawSnapshot {
+		return &rawSnapshot{
+			At: at, Procs: procs, Memory: memRaw{Total: 1024 * 1024}, // 1 GiB
+			CPU: cpuRaw{Cores: map[string]cpuCounter{}}, DiskIO: map[string]diskRaw{}, Network: map[string]netRaw{},
+		}
+	}
+	prev := mk(t0, map[int]procRaw{
+		10: {PID: 10, Name: "old", StartTicks: 1, CPUTicks: 0},
+		11: {PID: 11, Name: "busy", StartTicks: 1, CPUTicks: 100},
+		12: {PID: 12, Name: "reused", StartTicks: 1, CPUTicks: 5000},
+	})
+	cur := mk(t0.Add(2*time.Second), map[int]procRaw{
+		// 10：2 秒内用掉 200 tick = 2 秒 CPU → 100%
+		10: {PID: 10, Name: "old", StartTicks: 1, CPUTicks: 200, RSSPages: 256},
+		// 11：仅 100 tick → 50%
+		11: {PID: 11, Name: "busy", StartTicks: 1, CPUTicks: 200, RSSPages: 1024},
+		// 12：PID 被复用（starttime 变了），CPU 必须归零而不是 2500%
+		12: {PID: 12, Name: "reused", StartTicks: 9, CPUTicks: 10000, RSSPages: 64},
+	})
+
+	snap := buildSnapshot(prev, cur, 2)
+	if len(snap.Processes.TopCPU) != 2 || len(snap.Processes.TopMem) != 2 {
+		t.Fatalf("top lists = %+v", snap.Processes)
+	}
+	if snap.Processes.Scanned != 3 {
+		t.Fatalf("scanned = %d", snap.Processes.Scanned)
+	}
+	if got := snap.Processes.TopCPU[0]; got.PID != 10 || got.CPU != 100 {
+		t.Fatalf("top cpu #1 = %+v", got)
+	}
+	if got := snap.Processes.TopCPU[1]; got.PID != 11 || got.CPU != 50 {
+		t.Fatalf("top cpu #2 = %+v", got)
+	}
+	for _, p := range snap.Processes.TopCPU {
+		if p.PID == 12 && p.CPU != 0 {
+			t.Fatalf("pid reuse should reset cpu, got %+v", p)
+		}
+	}
+	// RSS: 1024 page * 4KiB = 4MiB，占 1GiB 的 0.39%
+	if got := snap.Processes.TopMem[0]; got.PID != 11 || got.RSS != 1024*4096 {
+		t.Fatalf("top mem #1 = %+v", got)
+	}
+	if got := snap.Processes.TopMem[0].Mem; got <= 0 || got > 1 {
+		t.Fatalf("mem percent = %v", got)
+	}
+	// topN=0 时不采集，避免纯 JSON 消费方多付代价。
+	if s := buildSnapshot(prev, cur, 0); len(s.Processes.TopCPU) != 0 {
+		t.Fatalf("topN=0 should disable lists")
 	}
 }
